@@ -1,0 +1,163 @@
+
+%  TASK 6: MATLAB / SIMULINK MULTIBODY PREPARATION
+%
+%  Purpose:
+%      1. Open the imported robot model
+%      2. List detected bodies (Solid blocks)
+%      3. List detected joints (Revolute / Prismatic / other joint blocks)
+%      4. Check that the base is connected to the World Frame
+%      5. Run a simple joint-motion test to confirm the model responds
+%
+%  Group should screenshot the Simulink canvas AFTER running Section 2,
+%  and screenshot the scope/animation AFTER running Section 5.
+% ========================================================================
+
+clear;
+clc;
+close all;
+
+%% ------------------------------------------------------------------
+% SECTION 0: SETTINGS
+% ------------------------------------------------------------------
+
+model_name = 'pkg_4_dof_robotic_arm_10_snapshot_2';
+
+%% ------------------------------------------------------------------
+% SECTION 1: OPEN THE MODEL
+% ------------------------------------------------------------------
+
+if ~bdIsLoaded(model_name)
+    open_system(model_name);
+end
+
+fprintf('========================================\n');
+fprintf('Model "%s" opened.\n', model_name);
+fprintf('========================================\n\n');
+
+% >>> SCREENSHOT POINT #1: take a screenshot of the Simulink canvas here
+% >>> (this satisfies "screenshot of the imported model")
+
+%% ------------------------------------------------------------------
+% SECTION 2: LIST DETECTED BODIES (Solid blocks)
+% ------------------------------------------------------------------
+
+all_blocks = find_system(model_name, 'LookUnderMasks', 'all');
+
+body_blocks = find_system(model_name, ...
+    'LookUnderMasks', 'all', ...
+    'RegExp', 'on', ...
+    'ReferenceBlock', '.*Solid$');
+
+fprintf('---- DETECTED BODIES (Solid blocks) ----\n');
+if isempty(body_blocks)
+    fprintf('No Solid blocks detected automatically.\n');
+    fprintf('(If bodies did not import, list them manually from the\n');
+    fprintf(' SolidWorks assembly tree and note that here.)\n');
+else
+    for k = 1:numel(body_blocks)
+        fprintf('%2d. %s\n', k, body_blocks{k});
+    end
+end
+fprintf('Total bodies detected: %d\n\n', numel(body_blocks));
+
+%% ------------------------------------------------------------------
+% SECTION 3: LIST DETECTED JOINTS
+% ------------------------------------------------------------------
+
+joint_types = {'Revolute Joint','Prismatic Joint','Spherical Joint', ...
+               'Universal Joint','Cylindrical Joint','Weld Joint'};
+
+fprintf('---- DETECTED JOINTS ----\n');
+joint_count = 0;
+detected_joints = {};
+
+for i = 1:numel(joint_types)
+    matches = find_system(model_name, ...
+        'LookUnderMasks', 'all', ...
+        'RegExp', 'on', ...
+        'ReferenceBlock', ['.*' strrep(joint_types{i}, ' ', '.*') '$']);
+    for k = 1:numel(matches)
+        joint_count = joint_count + 1;
+        detected_joints{end+1} = matches{k}; %#ok<AGROW>
+        fprintf('%2d. [%s] %s\n', joint_count, joint_types{i}, matches{k});
+    end
+end
+
+if joint_count == 0
+    fprintf('No joint blocks detected automatically.\n');
+    fprintf('This usually means the SolidWorks mates were not translated\n');
+    fprintf('into Simscape joints on export. See Section 4 for the fix.\n');
+end
+fprintf('Total joints detected: %d (expected: 4 for a 4-DOF arm)\n\n', joint_count);
+
+%% ------------------------------------------------------------------
+% SECTION 4: CHECK BASE -> WORLD FRAME CONNECTION
+% ------------------------------------------------------------------
+
+world_frame_blocks = find_system(model_name, ...
+    'LookUnderMasks', 'all', ...
+    'RegExp', 'on', ...
+    'ReferenceBlock', '.*World Frame$');
+
+fprintf('---- WORLD FRAME CHECK ----\n');
+if isempty(world_frame_blocks)
+    fprintf(['No World Frame block found. ACTION REQUIRED:\n' ...
+             '  1. Open the Simscape Multibody library.\n' ...
+             '  2. Drag a "World Frame" block onto the canvas.\n' ...
+             '  3. Connect its port to the base body''s reference frame\n' ...
+             '     (usually via a Rigid Transform block if the base\n' ...
+             '     origin does not already sit at the world origin).\n\n']);
+else
+    fprintf('World Frame block found: %s\n', world_frame_blocks{1});
+    fprintf('Confirm manually that its connector line actually links\n');
+    fprintf('to the base body (a dangling port looks connected but is not).\n\n');
+end
+
+% ---- EXPLANATION TEMPLATE FOR THE REPORT ----
+% Fill this in based on what you actually observed:
+%
+% "What worked": ...
+% "What failed": ...
+% "Possible reason": e.g. mates in SolidWorks were not fully defined as
+%   mechanical joints (some were left as generic mates), so Simscape
+%   could not infer a joint type and inserted a Weld Joint (rigid) instead.
+% "Manual correction": e.g. delete the Weld Joint, insert a Revolute Joint,
+%   set the correct rotation axis, and reconnect the Base and Follower
+%   frame ports to the correct Solid blocks.
+
+%% ------------------------------------------------------------------
+% SECTION 5: SIMPLE JOINT MOTION TEST
+% ------------------------------------------------------------------
+% This drives ONE joint with a small step motion to confirm the model
+% is wired correctly end-to-end (base -> joint -> body -> visualized).
+
+test_time   = 4;          % seconds
+test_angle  = 20;         % degrees, small safe test motion
+Ts_test     = 0.01;
+
+t_test  = (0:Ts_test:test_time)';
+q_test  = deg2rad([zeros(round(numel(t_test)/2),1); ...
+                    test_angle*ones(numel(t_test)-round(numel(t_test)/2),1)]);
+
+joint_test_input = [t_test q_test]; %#ok<NASGU> % feed into a Simulink-PS Converter / From Workspace block
+
+fprintf('---- SIMPLE MOTION TEST ----\n');
+fprintf('Test signal "joint_test_input" created:\n');
+fprintf('  Duration : %d s\n', test_time);
+fprintf('  Step     : 0 deg -> %d deg at t = %.1f s\n', test_angle, test_time/2);
+fprintf('Wire this into the first detected joint''s actuation input,\n');
+fprintf('set model StopTime to %d, and run the simulation.\n\n', test_time);
+
+set_param(model_name, 'StopTime', num2str(test_time));
+
+try
+    sim(model_name);
+    fprintf('Simulation ran successfully.\n');
+    fprintf('>>> SCREENSHOT POINT #2: capture the animation/scope now.\n');
+catch ME
+    fprintf('Simulation did NOT run. Error message:\n');
+    fprintf('  %s\n', ME.message);
+    fprintf(['This is expected if joints/bodies are still missing.\n' ...
+             'Document this failure in the report per the assignment''s\n' ...
+             '"Important Note" (what worked / what failed / why / fix).\n']);
+end
